@@ -1,0 +1,14 @@
+__pycache__
+venv/
+Dockerfile
+.dockerignore
+.pytest_cache
+docker-compose.yml
+.gitignore
+.idea
+.git
+*.env*
+
+# Ignore mount volume
+.db_data
+.redis_data
