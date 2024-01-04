@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 
 from pydantic import BaseModel
@@ -47,3 +48,14 @@ class RatingReport(BaseModel):
     three_star: int = 0
     four_star: int = 0
     five_star: int = 0
+
+
+class ReserveOrder(BaseModel):
+    parking_space_id: int
+    vehicle_id: int
+
+
+class ValidateModel(BaseModel):
+    license_plate: str
+    user_id: int
+    timestamp: datetime

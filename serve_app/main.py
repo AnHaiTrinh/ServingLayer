@@ -1,16 +1,16 @@
-from dotenv import load_dotenv, find_dotenv
-
-load_dotenv(find_dotenv())
-
+import json
+from datetime import datetime
 import collections
+import requests
 from typing import Optional
 from sqlalchemy import func as F
 from fastapi import FastAPI, Query, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from .db import DatabaseDependency
-from .auth import SensorDependency
-from .models import ParkingSpace, RatingFeedback
-from .schemas import CapacityReport, State, ParkingSpaceOut, RatingReport
+from .auth import SensorDependency, CameraDependency
+from .models import ParkingSpace, RatingFeedback, Vehicle, ActivityLog
+from .schemas import CapacityReport, State, ParkingSpaceOut, RatingReport, ReserveOrder, ValidateModel
+from .kafka import KafkaProducerDependency
 
 app = FastAPI()
 
@@ -98,3 +98,112 @@ def get_rating_from_parking_lot(
         elif rating == 5:
             response.five_star = count
     return response
+
+
+@app.post('/reserve', status_code=status.HTTP_204_NO_CONTENT)
+def reserve_space(
+        reserve_order: ReserveOrder,
+        kafka_producer: KafkaProducerDependency
+):
+    exception = None
+
+    def acked(err, msg):
+        if err is not None:
+            nonlocal exception
+            print(f"Failed to deliver message {msg}: {err}")
+            exception = HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                      detail='Failed to reserve space')
+
+    message = reserve_order.model_dump()
+    del message['parking_space_id']
+    message['updated_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+    message['state'] = 'reserved'
+    kafka_producer.produce(
+        topic='parking_space_state_raw',
+        key=str(reserve_order.parking_space_id),
+        value=json.dumps(message),
+        callback=acked
+    )
+    kafka_producer.poll(1)
+    if exception:
+        raise exception
+    return
+
+
+@app.post('/validate/in', response_model=ParkingSpaceOut, status_code=status.HTTP_200_OK)
+def validate_in(
+    camera: CameraDependency,
+    db: DatabaseDependency,
+    info: ValidateModel
+):
+    license_plate = info.license_plate
+    vehicle = db.query(Vehicle).filter(Vehicle.license_plate == license_plate).first()
+    if vehicle is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Vehicle not registered')
+    if vehicle.owner_id != info.user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Vehicle not owned by user')
+
+    vehicle_type = vehicle.vehicle_type
+    parking_lot_id = camera.parking_lot_id
+    resp = requests.get('http://localhost:8000/parking_lots', params={
+        'parking_lot_id': parking_lot_id,
+    })
+    if resp.status_code != 200:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f'Fail to get space status for parking lot {parking_lot_id}')
+    free_space = resp.json()[vehicle_type]['free']
+    if free_space == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Parking lot is full')
+
+    parking_space_list = requests.get('http://localhost:8000/recommend', params={
+        'parking_lot_id': parking_lot_id,
+        'vehicle_type': vehicle_type,
+    })
+    if parking_space_list.status_code != 200:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Fail to get parking space')
+    parking_space = parking_space_list.json()[0]
+
+    response = requests.post('http://localhost:8000/reserve', json={
+        'parking_space_id': parking_space['id'],
+        'vehicle_id': vehicle.id,
+    })
+    if response.status_code != 204:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Fail to reserve parking space')
+
+    activity_log = ActivityLog(
+        activity_type='in',
+        vehicle_id=vehicle.id,
+        parking_lot_id=parking_lot_id,
+        timestamp=info.timestamp,
+    )
+    db.add(activity_log)
+    db.commit()
+    return parking_space
+
+
+@app.post('/validate/out', status_code=status.HTTP_204_NO_CONTENT)
+def validate_out(
+    camera: CameraDependency,
+    db: DatabaseDependency,
+    info: ValidateModel
+):
+    license_plate = info.license_plate
+    vehicle = db.query(Vehicle).filter(Vehicle.license_plate == license_plate).first()
+    if vehicle is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Vehicle not registered')
+    if vehicle.owner_id != info.user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Vehicle not owned by user')
+    activity_log = ActivityLog(
+        activity_type='out',
+        vehicle_id=vehicle.id,
+        parking_lot_id=camera.parking_lot_id,
+        timestamp=info.timestamp,
+    )
+    db.add(activity_log)
+    db.commit()
+    return
+
+
+@app.get('/', status_code=status.HTTP_200_OK)
+def health_check():
+    return {'message': 'OK'}
