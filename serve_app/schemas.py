@@ -1,7 +1,8 @@
 from datetime import datetime
 from enum import Enum
+from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class StateType(str, Enum):
@@ -16,8 +17,17 @@ class VehicleType(str, Enum):
     truck = 'truck'
 
 
-class State(BaseModel):
+class Vehicle(BaseModel):
+    vehicle_id: int
+    vehicle_type: VehicleType
+    license_plate: str
+
+
+class ParkingSpaceState(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     state: StateType
+    vehicle: Optional[Vehicle] = None
 
 
 class SpaceReport(BaseModel):
@@ -59,3 +69,15 @@ class ValidateModel(BaseModel):
     license_plate: str
     user_id: int
     timestamp: datetime
+
+
+class UserReport(BaseModel):
+    month: str
+    user: int = 0
+
+
+class VehicleReport(BaseModel):
+    month: str
+    car: int = 0
+    motorbike: int = 0
+    truck: int = 0

@@ -33,6 +33,7 @@ class ParkingSpace(Base):
     parking_lot_id = Column(Integer, nullable=False)
 
     sensor = relationship("Sensor", uselist=False, back_populates="parking_space")
+    vehicle = relationship("Vehicle")
 
 
 class RatingFeedback(Base):

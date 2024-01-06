@@ -1,5 +1,8 @@
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
+
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import collections
 import requests
 from typing import Optional
@@ -9,7 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .db import DatabaseDependency
 from .auth import SensorDependency, CameraDependency
 from .models import ParkingSpace, RatingFeedback, Vehicle, ActivityLog
-from .schemas import CapacityReport, State, ParkingSpaceOut, RatingReport, ReserveOrder, ValidateModel
+from .redis import RedisDependency
+from .schemas import CapacityReport, ParkingSpaceState, ParkingSpaceOut, ReserveOrder, RatingReport, ValidateModel, UserReport, VehicleReport
 from .kafka import KafkaProducerDependency
 
 app = FastAPI()
@@ -42,17 +46,17 @@ def get_parking_space_from_parking_lot(
     return response
 
 
-@app.get('/sensors', response_model=State, status_code=status.HTTP_200_OK)
+@app.get('/sensors', response_model=ParkingSpaceState, status_code=status.HTTP_200_OK)
 def get_sensor_state(
-        sensor: SensorDependency,
-        db: DatabaseDependency,
+    sensor: SensorDependency,
+    db: DatabaseDependency,
 ):
     parking_space_id = sensor.parking_space_id
-    state = db.query(ParkingSpace.state).filter(ParkingSpace.id == parking_space_id).first()
-    if not state:
+    parking_space = db.query(ParkingSpace).filter(ParkingSpace.id == parking_space_id).first()
+    if not parking_space:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail='Associated parking space not found')
-    return state
+    return parking_space
 
 
 @app.get('/recommend', response_model=list[ParkingSpaceOut], status_code=status.HTTP_200_OK)
@@ -132,9 +136,9 @@ def reserve_space(
 
 @app.post('/validate/in', response_model=ParkingSpaceOut, status_code=status.HTTP_200_OK)
 def validate_in(
-    camera: CameraDependency,
-    db: DatabaseDependency,
-    info: ValidateModel
+        camera: CameraDependency,
+        db: DatabaseDependency,
+        info: ValidateModel
 ):
     license_plate = info.license_plate
     vehicle = db.query(Vehicle).filter(Vehicle.license_plate == license_plate).first()
@@ -183,9 +187,9 @@ def validate_in(
 
 @app.post('/validate/out', status_code=status.HTTP_204_NO_CONTENT)
 def validate_out(
-    camera: CameraDependency,
-    db: DatabaseDependency,
-    info: ValidateModel
+        camera: CameraDependency,
+        db: DatabaseDependency,
+        info: ValidateModel
 ):
     license_plate = info.license_plate
     vehicle = db.query(Vehicle).filter(Vehicle.license_plate == license_plate).first()
@@ -202,6 +206,28 @@ def validate_out(
     db.add(activity_log)
     db.commit()
     return
+
+
+@app.get('/vehicles', response_model=list[VehicleReport], status_code=status.HTTP_200_OK)
+def get_vehicle_by_hour(
+        redis: RedisDependency,
+        final_time: int = Query(default_factory=lambda: int(datetime.now().timestamp()), ge=0),
+        hour_range: int = Query(default=24, ge=1, le=24),
+):
+    res = []
+    for hour in range(hour_range):
+        datetime_format = datetime.fromtimestamp(final_time - 3600 * hour).strftime("%Y-%m-%d %H:00:00")
+        key = f'parking_lot_vehicle:{datetime_format}'
+        record = {
+            'hour': datetime_format,
+        }
+        for vehicle_type in ['car', 'motorbike', 'truck']:
+            vehicle = redis.hget(key, vehicle_type)
+            if not vehicle:
+                vehicle = 0
+            record[vehicle_type] = int(vehicle)
+        res.append(record)
+    return res
 
 
 @app.get('/', status_code=status.HTTP_200_OK)
