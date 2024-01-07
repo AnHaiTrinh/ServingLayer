@@ -1,8 +1,5 @@
-from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv())
-
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 import collections
 import requests
 from typing import Optional
@@ -13,7 +10,8 @@ from .db import DatabaseDependency
 from .auth import SensorDependency, CameraDependency
 from .models import ParkingSpace, RatingFeedback, Vehicle, ActivityLog
 from .redis import RedisDependency
-from .schemas import CapacityReport, ParkingSpaceState, ParkingSpaceOut, ReserveOrder, RatingReport, ValidateModel, UserReport, VehicleReport
+from .schemas import (CapacityReport, ParkingSpaceState, ParkingSpaceOut, ReserveOrder, RatingReport, ValidateModel,
+                      VehicleReport)
 from .kafka import KafkaProducerDependency
 
 app = FastAPI()

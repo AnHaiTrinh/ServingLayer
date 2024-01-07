@@ -18,7 +18,7 @@ class VehicleType(str, Enum):
 
 
 class Vehicle(BaseModel):
-    vehicle_id: int
+    id: int
     vehicle_type: VehicleType
     license_plate: str
 
@@ -71,13 +71,8 @@ class ValidateModel(BaseModel):
     timestamp: datetime
 
 
-class UserReport(BaseModel):
-    month: str
-    user: int = 0
-
-
 class VehicleReport(BaseModel):
-    month: str
+    hour: str
     car: int = 0
     motorbike: int = 0
     truck: int = 0
