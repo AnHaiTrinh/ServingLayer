@@ -118,7 +118,7 @@ def reserve_space(
 
     message = reserve_order.model_dump()
     del message['parking_space_id']
-    message['updated_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+    message['updated_at'] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")
     message['state'] = 'reserved'
     kafka_producer.produce(
         topic='parking_space_state_raw',
@@ -209,7 +209,7 @@ def validate_out(
 @app.get('/vehicles', response_model=list[VehicleReport], status_code=status.HTTP_200_OK)
 def get_vehicle_by_hour(
         redis: RedisDependency,
-        final_time: int = Query(default_factory=lambda: int(datetime.now().timestamp()), ge=0),
+        final_time: int = Query(default_factory=lambda: int(datetime.utcnow().timestamp()), ge=0),
         hour_range: int = Query(default=24, ge=1, le=24),
 ):
     res = []
